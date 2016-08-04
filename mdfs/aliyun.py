@@ -50,7 +50,7 @@ class AliyunDevice(BaseDevice):
     def _get_upload_session(self, session_id):
         """获取upload_session"""
         if not UPLOAD_SESSIONS.has_key(session_id):
-            upload_id, key, size = session_id.rsplit(':', 2)
+            upload_id, key = session_id.rsplit(':', 1)
             parts = self.bucket.list_parts(key, upload_id).parts
             part_number = len('parts') + 1
             offset = 0
@@ -83,48 +83,52 @@ class AliyunDevice(BaseDevice):
 
     def multiput_new(self, key, size=-1):
         """开始一个多次上传会话, 返回会话ID"""
-        session_id = ':'.join([self.bucket.init_multipart_upload(key).upload_id, key, str(size)])
+        session_id = ':'.join([self.bucket.init_multipart_upload(key).upload_id, key])
         UPLOAD_SESSIONS[session_id] = {'parts': [], 'offset': 0, 'part_number': 1, 'buffer': ''}
         return session_id
 
     def multiput_offset(self, session_id):
         """ 某个文件当前上传位置 """
-        upload_id, key, size = session_id.rsplit(':', 2)
+        upload_id = session_id.rsplit(':', 1)[1]
         if not UPLOAD_SESSIONS.has_key(session_id):
             UPLOAD_SESSIONS[upload_id] = self._get_upload_session(session_id)
         return UPLOAD_SESSIONS[session_id].get('offset')
 
     def multiput(self, session_id, data, offset=None):
         """ 从offset处上传数据 """
-        upload_id, key, size = session_id.rsplit(':', 2)
         upload_session = self._get_upload_session(session_id)
-        buffer_data = self._get_buffer_data(upload_session, data, size)
-        if buffer_data is not None:
-            if upload_session.get('offset') < int(size):
-                result = self.bucket.upload_part(key,
-                                                 upload_id,
-                                                 upload_session.get('part_number'),
-                                                 buffer_data
-                                                 )
-                upload_session['parts'].append(PartInfo(upload_session['part_number'], result.etag))
+        buffer_data = self._get_buffer_data(upload_session, data)
 
-                upload_session['offset'] += len(buffer_data)
-                upload_session['part_number'] += 1
+        return self._upload_data(buffer_data, session_id, upload_session)
+
+    def _upload_data(self, buffer_data, session_id, upload_session):
+        upload_id, key = session_id.rsplit(':', 1)
+        if buffer_data is not None:
+            result = self.bucket.upload_part(key,
+                                             upload_id,
+                                             upload_session.get('part_number'),
+                                             buffer_data
+                                             )
+            upload_session['parts'].append(PartInfo(upload_session['part_number'], result.etag))
+            upload_session['offset'] += len(buffer_data)
+            upload_session['part_number'] += 1
         return upload_session.get('offset')
 
     def multiput_save(self, session_id):
         """ 某个上传会话当前上传位置 """
-        upload_id, key, size = session_id.rsplit(':', 2)
+        upload_id, key = session_id.rsplit(':', 1)
+
+        # 上传最后一片数据
         upload_session = self._get_upload_session(session_id)
-        if int(size) != '-1' and upload_session.get('offset') != int(size):
-            raise Exception("File Size Check Failed")
+        self._upload_data(upload_session['buffer'], session_id, upload_session)
+
         self.bucket.complete_multipart_upload(key, upload_id, upload_session.get('parts'))
         UPLOAD_SESSIONS.pop(session_id)
         return key
 
     def multiput_delete(self, session_id):
         """ 删除一个上传会话 """
-        upload_id, key, size = session_id.rsplit(':', 2)
+        upload_id, key = session_id.rsplit(':', 1)
         upload_session = self._get_upload_session(session_id)
         self.bucket.abort_multipart_upload(key, upload_id)
         UPLOAD_SESSIONS.pop(session_id)
@@ -141,7 +145,6 @@ class AliyunDevice(BaseDevice):
         while self.exists(key):
             remove_file_list = [obj.key for obj in oss2.ObjectIterator(self.bucket, prefix=key, max_keys=1000)]
             self.bucket.batch_delete_objects(remove_file_list)
-
 
     def copy_data(self, from_key, to_key):
         """复制文件"""
@@ -178,14 +181,12 @@ class AliyunDevice(BaseDevice):
             "put_time": head_object.last_modified
         }
 
-    def _get_buffer_data(self, upload_session, data, size):
+    def _get_buffer_data(self, upload_session, data):
         """进行数据累积 累积长度为BUFFER_SIZE"""
         upload_session['buffer'] += data
         if len(upload_session['buffer']) >= BUFFER_SIZE:
             buffer_data = upload_session['buffer']
             upload_session['buffer'] = ''
             return buffer_data
-        elif upload_session['offset'] + len(upload_session['buffer']) >= size:
-            return upload_session['buffer']
         else:
             return None
