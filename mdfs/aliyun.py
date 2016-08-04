@@ -2,6 +2,7 @@
 
 # refer document: https://help.aliyun.com/document_detail/32030.html?spm=5176.doc32032.6.306.4N1U2T
 import os
+import sys
 import mimetypes
 
 import oss2
@@ -45,11 +46,11 @@ class AliyunDevice(BaseDevice):
                 self.local_device.multiput(session_id, self.get_data(key, offset, PART_SIZE))
                 offset += PART_SIZE
             self.local_device.multiput_save(session_id)
-        return os_path
+        return os_path 
 
     def _get_upload_session(self, session_id):
         """获取upload_session"""
-        if not UPLOAD_SESSIONS.has_key(session_id):
+        if session_id not in UPLOAD_SESSIONS:
             upload_id, key = session_id.rsplit(':', 1)
             parts = self.bucket.list_parts(key, upload_id).parts
             part_number = len('parts') + 1
@@ -58,7 +59,7 @@ class AliyunDevice(BaseDevice):
                 offset += part.size
             UPLOAD_SESSIONS[session_id] = {
                 'parts': parts, 'part_number': part_number,
-                'offset': offset, 'buffer': ''
+                'offset': offset, 'buffer': bytes() 
             }
         return UPLOAD_SESSIONS[session_id]
 
@@ -84,15 +85,13 @@ class AliyunDevice(BaseDevice):
     def multiput_new(self, key, size=-1):
         """开始一个多次上传会话, 返回会话ID"""
         session_id = ':'.join([self.bucket.init_multipart_upload(key).upload_id, key])
-        UPLOAD_SESSIONS[session_id] = {'parts': [], 'offset': 0, 'part_number': 1, 'buffer': ''}
+        UPLOAD_SESSIONS[session_id] = {'parts': [], 'offset': 0, 'part_number': 1, 'buffer': bytes()} 
         return session_id
 
     def multiput_offset(self, session_id):
         """ 某个文件当前上传位置 """
-        upload_id = session_id.rsplit(':', 1)[1]
-        if not UPLOAD_SESSIONS.has_key(session_id):
-            UPLOAD_SESSIONS[upload_id] = self._get_upload_session(session_id)
-        return UPLOAD_SESSIONS[session_id].get('offset')
+        upload_session = self._get_upload_session(session_id)
+        return upload_session.get('offset')
 
     def multiput(self, session_id, data, offset=None):
         """ 从offset处上传数据 """
