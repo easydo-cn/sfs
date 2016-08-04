@@ -23,7 +23,7 @@ class AliyunTestCase(unittest.TestCase):
         pass
 
     def test_1_exists(self):
-        key = "ff/.frs/aa.doc/archived/abcd.txt"
+        key = "ff/.frs/aa.doc/"
         self.assertTrue(
             self.aliyun_device.exists(key)
         )

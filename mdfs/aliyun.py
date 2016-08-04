@@ -137,10 +137,11 @@ class AliyunDevice(BaseDevice):
 
     def rmdir(self, key):
         """ 删除前缀为key的云端和本地Cache的文件夹"""
-        remove_file_list = [obj.key for obj in oss2.ObjectIterator(self.bucket, prefix=key)]
-        self.bucket.batch_delete_objects(remove_file_list)
-
         self.local_device.rmdir(key)
+        while self.exists(key):
+            remove_file_list = [obj.key for obj in oss2.ObjectIterator(self.bucket, prefix=key, max_keys=1000)]
+            self.bucket.batch_delete_objects(remove_file_list)
+
 
     def copy_data(self, from_key, to_key):
         """复制文件"""
